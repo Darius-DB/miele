@@ -6,6 +6,7 @@ import org.springframework.data.neo4j.core.schema.GeneratedValue;
 import org.springframework.data.neo4j.core.schema.Id;
 import org.springframework.data.neo4j.core.schema.Node;
 import org.springframework.data.neo4j.core.schema.Relationship;
+import org.springframework.data.neo4j.core.schema.CompositeProperty;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,6 +23,7 @@ public class Recipe {
     private String id;
     private String type;
     private Integer schemaVersion;
+    @CompositeProperty(prefix = "label")
     private Map<String, String> labels = new HashMap<>();
     @Relationship(type = "HAS_STEP", direction = Relationship.Direction.OUTGOING)
     private List<RecipeStep> steps = new ArrayList<>();

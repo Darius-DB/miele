@@ -4,6 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.springframework.data.neo4j.core.schema.Id;
 import org.springframework.data.neo4j.core.schema.Node;
+import org.springframework.data.neo4j.core.schema.CompositeProperty;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -16,6 +17,7 @@ public class RecipeStep {
     @Id
     private String id;
     private Integer sequence;
+    @CompositeProperty(prefix = "label")
     private Map<String, String> labels = new HashMap<>();
 
     public RecipeStep() {
