@@ -1,0 +1,67 @@
+# =============================================================
+# Miele CKB - Recipe Service CI/CD pipeline
+#
+# Pipeline stages:
+#   build  -> compile sources
+#   test   -> run unit + integration tests
+#   deploy -> publish artifact to Artifactory via `mvn deploy`
+# =============================================================
+
+image: maven:3.9-eclipse-temurin-21
+
+# Cache the local Maven repo so each job does not redownload deps.
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
+  MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end --show-version -s .gitlab/settings.xml"
+
+cache:
+  key: "$CI_JOB_NAME"
+  paths:
+    - .m2/repository
+
+stages:
+  - build
+  - test
+  - deploy
+
+build:
+  stage: build
+  script:
+    - mvn $MAVEN_CLI_OPTS clean compile
+
+test:
+  stage: test
+  services:
+    - name: docker:24-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    # Tell Testcontainers to use the dind service.
+    TESTCONTAINERS_HOST_OVERRIDE: docker
+  script:
+    - mvn $MAVEN_CLI_OPTS verify
+  artifacts:
+    when: always
+    reports:
+      junit:
+        - target/surefire-reports/TEST-*.xml
+        - target/failsafe-reports/TEST-*.xml
+
+# Publish SNAPSHOT artifacts from the main branch.
+deploy:snapshot:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG == null'
+  script:
+    - mvn $MAVEN_CLI_OPTS deploy -DskipTests
+
+# Publish RELEASE artifacts only on Git tags vX.Y.Z.
+# This enforces the IMMUTABLE-release rule from Q4.
+deploy:release:
+  stage: deploy
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  script:
+    - mvn $MAVEN_CLI_OPTS versions:set -DnewVersion=${CI_COMMIT_TAG#v} -DgenerateBackupPoms=false
+    - mvn $MAVEN_CLI_OPTS deploy -DskipTests
