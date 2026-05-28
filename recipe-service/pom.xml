@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<!-- =========================================================
+         Parent: Spring Boot BOM.
+         Pulls in a curated, tested set of dependency versions so
+         we don't have to manage them ourselves ("Maven dependency
+         hell" avoidance — talking point for Q4).
+         ========================================================= -->
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.3.4</version>
+		<relativePath/>
+	</parent>
+
+	<!-- =========================================================
+         Coordinates of THIS artifact.
+         groupId:artifactId:version is what consumers reference
+         in their own pom.xml. Version follows Semantic Versioning:
+           MAJOR.MINOR.PATCH
+         and uses -SNAPSHOT while in development.
+         ========================================================= -->
+	<groupId>com.miele.ckb</groupId>
+	<artifactId>recipe-service</artifactId>
+	<version>0.1.0-SNAPSHOT</version>
+	<packaging>jar</packaging>
+
+	<name>recipe-service</name>
+	<description>Miele CKB - Recipe ingestion microservice</description>
+
+	<properties>
+		<java.version>21</java.version>
+		<maven.compiler.source>21</maven.compiler.source>
+		<maven.compiler.target>21</maven.compiler.target>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+		<!-- Centralized versions for non-BOM-managed deps. -->
+		<mapstruct.version>1.6.2</mapstruct.version>
+		<lombok.version>1.18.36</lombok.version>
+		<lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+		<springdoc.version>2.6.0</springdoc.version>
+	</properties>
+
+	<!-- =========================================================
+         dependencyManagement: define versions ONCE, declare deps
+         without versions below. Critical for keeping transitive
+         versions consistent across the artifact.
+         ========================================================= -->
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>1.20.2</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<dependencies>
+		<!-- ===== Web layer ===== -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+
+		<!-- ===== Validation (Jakarta Bean Validation) ===== -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!-- ===== Persistence: encapsulated graph DB access ===== -->
+		<!-- Spring Data Neo4j gives us a Repository abstraction so
+             business code never touches Cypher directly. Demonstrates
+             the OO-encapsulation advantage from Q2.                    -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-neo4j</artifactId>
+		</dependency>
+
+		<!-- ===== Observability ===== -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!-- ===== OpenAPI / Swagger UI ===== -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>${springdoc.version}</version>
+		</dependency>
+
+		<!-- ===== Mapping: DTO <-> domain ===== -->
+		<dependency>
+			<groupId>org.mapstruct</groupId>
+			<artifactId>mapstruct</artifactId>
+			<version>${mapstruct.version}</version>
+		</dependency>
+
+		<!-- ===== Lombok ===== -->
+		<dependency>
+			<groupId>org.projectlombok</groupId>
+			<artifactId>lombok</artifactId>
+			<version>${lombok.version}</version>
+			<scope>provided</scope>
+		</dependency>
+
+		<!-- ============================================================
+             TEST scope dependencies — note the explicit <scope>test</scope>.
+             Talking point for Q4: scopes prevent test deps from leaking
+             into the runtime classpath of consumers.
+             ============================================================ -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>neo4j</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<!-- =========================================================
+                 Compiler plugin: enable annotation processors for
+                 Lombok + MapStruct. Order matters: lombok first, then
+                 the binding, then mapstruct.
+                 ========================================================= -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<configuration>
+					<source>${java.version}</source>
+					<target>${java.version}</target>
+					<annotationProcessorPaths>
+						<path>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok</artifactId>
+							<version>${lombok.version}</version>
+						</path>
+						<path>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok-mapstruct-binding</artifactId>
+							<version>${lombok-mapstruct-binding.version}</version>
+						</path>
+						<path>
+							<groupId>org.mapstruct</groupId>
+							<artifactId>mapstruct-processor</artifactId>
+							<version>${mapstruct.version}</version>
+						</path>
+					</annotationProcessorPaths>
+				</configuration>
+			</plugin>
+
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<excludes>
+						<exclude>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok</artifactId>
+						</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
+	<!-- =========================================================
+         distributionManagement: where `mvn deploy` publishes to.
+         Replace the placeholder URLs with your real Artifactory.
+         Talking point for Q4: snapshots and releases go to
+         DIFFERENT repositories; release versions must be IMMUTABLE.
+         ========================================================= -->
+	<distributionManagement>
+		<repository>
+			<id>miele-artifactory-releases</id>
+			<name>Miele Artifactory Releases</name>
+			<url>https://artifactory.example.miele.com/artifactory/libs-release-local</url>
+		</repository>
+		<snapshotRepository>
+			<id>miele-artifactory-snapshots</id>
+			<name>Miele Artifactory Snapshots</name>
+			<url>https://artifactory.example.miele.com/artifactory/libs-snapshot-local</url>
+		</snapshotRepository>
+	</distributionManagement>
+</project>
