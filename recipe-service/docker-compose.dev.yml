@@ -1,0 +1,18 @@
+# Local development dependencies for the recipe-service.
+#
+#   docker compose -f docker-compose.dev.yml up -d   # start
+#   docker compose -f docker-compose.dev.yml down    # stop
+services:
+  neo4j:
+    image: neo4j:5.20
+    container_name: miele-neo4j
+    ports:
+      - "7474:7474"   # HTTP / Neo4j Browser
+      - "7687:7687"   # Bolt protocol (used by the app)
+    environment:
+      NEO4J_AUTH: neo4j/test12345
+    volumes:
+      - miele-neo4j-data:/data
+
+volumes:
+  miele-neo4j-data:
