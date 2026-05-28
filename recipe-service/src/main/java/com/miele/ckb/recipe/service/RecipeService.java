@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Optional;
+
 
 @Service
 public class RecipeService {
@@ -36,6 +39,16 @@ public class RecipeService {
         log.info("Persisted recipe id={} schemaVersion={}",
                 saved.getId(), saved.getSchemaVersion());
         return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Recipe> findById(String id) {
+        return repository.findById(id);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Recipe> findAll() {
+        return repository.findAll();
     }
 
 

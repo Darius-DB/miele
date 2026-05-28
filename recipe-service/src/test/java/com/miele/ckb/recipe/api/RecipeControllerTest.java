@@ -1,6 +1,7 @@
 package com.miele.ckb.recipe.api;
 
 import com.miele.ckb.recipe.api.dto.RecipeDTO;
+import com.miele.ckb.recipe.api.mapper.RecipeMapper;
 import com.miele.ckb.recipe.domain.Recipe;
 import com.miele.ckb.recipe.service.RecipeService;
 import org.junit.jupiter.api.Test;
@@ -71,5 +72,6 @@ class RecipeControllerTest {
     @TestConfiguration
     static class MockedServiceConfig {
         @Bean RecipeService recipeService() { return mock(RecipeService.class); }
+        @Bean RecipeMapper recipeMapper() { return new com.miele.ckb.recipe.api.mapper.RecipeMapperImpl(); }
     }
 }

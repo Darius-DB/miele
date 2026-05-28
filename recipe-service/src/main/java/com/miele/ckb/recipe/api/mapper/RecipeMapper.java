@@ -2,6 +2,7 @@ package com.miele.ckb.recipe.api.mapper;
 
 import com.miele.ckb.recipe.api.dto.LabelDTO;
 import com.miele.ckb.recipe.api.dto.RecipeDTO;
+import com.miele.ckb.recipe.api.dto.RecipeResponse;
 import com.miele.ckb.recipe.api.dto.RecipeStepDTO;
 import com.miele.ckb.recipe.domain.Recipe;
 import com.miele.ckb.recipe.domain.RecipeStep;
@@ -26,6 +27,14 @@ public interface RecipeMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "labels", source = "label", qualifiedByName = "labelToMap")
     RecipeStep toDomain(RecipeStepDTO dto);
+
+    @Mapping(target = "version", source = "schemaVersion")
+    @Mapping(target = "label",   source = "labels")
+    @Mapping(target = "recipeSteps", source = "steps")
+    RecipeResponse toResponse(Recipe recipe);
+
+    @Mapping(target = "label", source = "labels")
+    RecipeResponse.Step toResponseStep(RecipeStep step);
 
     List<RecipeStep> toDomainSteps(List<RecipeStepDTO> dtos);
 

@@ -49,6 +49,13 @@ public class GlobalExceptionHandler {
                 "Malformed or missing request body", Map.of("detail", ex.getMostSpecificCause().getMessage())));
     }
 
+    @ExceptionHandler(com.miele.ckb.recipe.service.RecipeNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleNotFound(
+            com.miele.ckb.recipe.service.RecipeNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(body(HttpStatus.NOT_FOUND, ex.getMessage(), Map.of()));
+    }
+
     private Map<String, Object> body(HttpStatus status, String message, Map<String, ?> extras) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("timestamp", Instant.now().toString());

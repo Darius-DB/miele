@@ -3,6 +3,7 @@ package com.miele.ckb.recipe.persistence;
 import com.miele.ckb.recipe.domain.Recipe;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -26,5 +27,10 @@ public class RecipeRepositoryAdapter implements RecipeRepository {
     @Override
     public Optional<Recipe> findById(String id) {
         return delegate.findById(id);
+    }
+
+    @Override
+    public List<Recipe> findAll() {
+        return (List<Recipe>) delegate.findAll();
     }
 }
