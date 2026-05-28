@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: recipe-service
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: test12345
+  data:
+    neo4j:
+      database: neo4j
+
+server:
+  port: 8080
+
+# Jackson — tolerant reader: ignore unknown fields so the service
+# does not break when the recipe JSON grows new fields (Q3).
+spring.jackson:
+  deserialization:
+    fail-on-unknown-properties: false
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
