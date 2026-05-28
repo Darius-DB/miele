@@ -1,102 +1,217 @@
 # Recipe Service
 
-Spring Boot microservice that ingests editorially recorded recipes (Figure 1
+A Spring Boot microservice that ingests editorially recorded recipes (Figure 1
 of the qualification task) and persists them into a Neo4j-backed ontology.
 
-- **Java** 21 · **Spring Boot** 3.3 · **Maven**
+```
+HTTP  ──►  Controller  ──►  DTO (+ Bean Validation)  ──►  Mapper  ──►
+Service (@Transactional)  ──►  RecipeRepository (port)  ──►  Neo4j adapter
+```
+
+- **Java** 21 · **Spring Boot** 3.3.x · **Maven**
 - **Neo4j** via Spring Data Neo4j
 - **MapStruct** for DTO ↔ domain mapping
 - **JUnit 5 + Mockito + Testcontainers** for tests
+- **GitLab CI** publishing snapshots/releases to Artifactory
+
+---
 
 ## Quick start
 
 ```bash
-# 1. Start Neo4j
+# 1. Start Neo4j (only needed once; data survives restarts)
 docker run -d --name miele-neo4j \
   -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/test12345 \
   neo4j:5.20
 
-# 2. Run the service
+# 2. Build & run
 mvn spring-boot:run
 
-# 3. POST a recipe
+# 3. Send the Figure 1 payload
 curl -i -X POST http://localhost:8080/api/v1/recipes \
   -H "Content-Type: application/json" \
   --data-binary @recipe.json
+
+# 4. Inspect the graph at http://localhost:7474
+#    MATCH (r:Recipe)-[:HAS_STEP]->(s) RETURN r, s;
 ```
 
 Swagger UI: <http://localhost:8080/swagger-ui.html>
+Actuator health: <http://localhost:8080/actuator/health>
+
+---
 
 ## Endpoints
 
-| Method | Path                     | Purpose            |
-|--------|--------------------------|--------------------|
-| POST   | `/api/v1/recipes`        | Ingest a recipe    |
-| GET    | `/api/v1/recipes`        | List all recipes   |
-| GET    | `/api/v1/recipes/{id}`   | Retrieve by id     |
+| Method | Path                       | Purpose                          |
+|--------|----------------------------|----------------------------------|
+| POST   | `/api/v1/recipes`          | Ingest a recipe                  |
+| GET    | `/api/v1/recipes`          | List all stored recipes          |
+| GET    | `/api/v1/recipes/{id}`     | Retrieve a single recipe         |
 
 ---
 
 # Answers to the qualification questions
 
-## a) Backend components
+## a) Backend components for storing the recipe
 
-The service is a layered pipeline; each concern lives in exactly one place.
+The service is built as a clean, layered pipeline. Each concern lives in
+exactly one place; cross-cutting concerns are handled centrally.
+
+| Layer / concern             | Class                                   | Responsibility                                                      |
+|-----------------------------|-----------------------------------------|---------------------------------------------------------------------|
+| HTTP routing                | `RecipeController`                      | Accept JSON, return `201 Created` with a `Location` header.        |
+| Input validation            | Bean Validation on `RecipeDTO`, `RecipeStepDTO`, `LabelDTO` | Declarative, runs before the service is invoked. |
+| Wire format (write)         | `RecipeDTO`, `RecipeStepDTO`, `LabelDTO` | Mirrors the JSON contract; isolated from the domain model.        |
+| Wire format (read)          | `RecipeResponse`                        | Read-side DTO; lets reads and writes evolve independently.         |
+| DTO ↔ domain translation    | `RecipeMapper` (MapStruct-generated)    | Single, type-safe translation point; no reflection at runtime.     |
+| Business orchestration      | `RecipeService`                         | `@Transactional`; rejects unsupported versions; entry point for future enrichment (ingredients, units, inference). |
+| Domain / ontology entities  | `Recipe`, `RecipeStep`                  | `@Node`-annotated, modelled as a graph aggregate connected by a `HAS_STEP` relationship. |
+| Persistence port            | `RecipeRepository`                      | Domain-facing interface; the service depends only on this.         |
+| Persistence adapter         | `RecipeRepositoryAdapter`               | Thin bridge to the chosen storage technology.                      |
+| Storage driver              | `Neo4jRecipeRepository` (Spring Data Neo4j) | Auto-implemented CRUD; the only place that *could* hold Cypher. |
+| Cross-cutting errors        | `GlobalExceptionHandler` (`@RestControllerAdvice`) | Validation → 400, unknown version → 422, not found → 404, otherwise 500. |
+| API documentation           | `springdoc-openapi`                     | Swagger UI generated from DTOs and validation annotations.         |
+| Observability               | Spring Boot Actuator                    | `/actuator/health` for liveness/readiness, metrics endpoints.       |
+| API versioning              | URL prefix `/api/v1/...`                | Allows breaking changes to live alongside the existing contract.   |
+
+The request flow is:
 
 ```
-HTTP ─► Controller ─► DTO (@Valid) ─► Mapper ─► Service (@Transactional)
-        ─► RecipeRepository (port) ─► Neo4j adapter ─► Neo4j
+POST /api/v1/recipes
+   │
+   ▼  @Valid triggers Bean Validation
+RecipeController
+   │
+   ▼
+RecipeService.ingest()   (@Transactional)
+   │   1. version check
+   │   2. mapper.toDomain(dto)  → Recipe + RecipeStep aggregate
+   │   3. (future) enrichment / inference hooks
+   ▼
+RecipeRepository.save()   (interface – no Cypher leaks here)
+   │
+   ▼
+Neo4jRecipeRepository   → Neo4j graph
 ```
 
-- **`RecipeController`** — HTTP routing, returns `201 Created` with a `Location` header.
-- **`RecipeDTO` / `RecipeStepDTO` / `LabelDTO`** — wire format, validated declaratively via Jakarta Bean Validation.
-- **`RecipeMapper`** (MapStruct) — single, generated, type-safe DTO ↔ domain translation.
-- **`RecipeService`** — `@Transactional` business orchestration; checks the payload `version`; hook point for future ontology enrichment.
-- **`Recipe` / `RecipeStep`** — domain entities modelled as `@Node`s connected by a `HAS_STEP` relationship.
-- **`RecipeRepository`** (interface) + **`RecipeRepositoryAdapter`** + **`Neo4jRecipeRepository`** — port/adapter/driver split so the service never touches Neo4j directly.
-- **`GlobalExceptionHandler`** — central `@RestControllerAdvice` mapping validation → 400, unknown version → 422, not found → 404.
-- **Cross-cutting**: Actuator (`/actuator/health`), springdoc-openapi (Swagger UI), URL prefix `/api/v1` for API versioning.
+---
 
-## b) Encapsulated DB access vs. native queries
+## b) Advantages of object-oriented, encapsulated DB access over native queries
 
-The service depends on the `RecipeRepository` **interface**, not on Neo4j. No
-Cypher exists in the business code. Concrete advantages:
+The persistence layer is intentionally split into **port + adapter + driver**
+(`RecipeRepository`, `RecipeRepositoryAdapter`, `Neo4jRecipeRepository`). The
+service never imports anything from Neo4j and never sees a line of Cypher.
 
-- **Swappable storage** — replacing Neo4j with another graph or RDF store changes one adapter class; the service, controller, DTOs and tests stay untouched.
-- **Type safety and refactorability** — repository methods are real Java methods; renames are IDE-safe. Cypher strings scattered across services are not.
-- **No injection by construction** — Spring Data binds parameters; hand-written query strings invite the classic injection pitfalls.
-- **Testability** — `RecipeServiceTest` mocks the repository with Mockito; no database needed to test business logic.
-- **Localized custom queries** — when a real custom query is genuinely needed, it lives in *one* repository interface, not duplicated as ad-hoc strings.
-- **Declarative transactions** — `@Transactional` (read-only on reads) wraps the whole aggregate write atomically.
-- **Domain-driven naming** — `repository.save(recipe)` reads as a business operation, not a graph traversal.
+Concrete advantages:
 
-Honest trade-off: complex traversals can be faster with hand-tuned Cypher. The
-right rule is *encapsulation by default, raw query when measurably necessary* —
-and even then it lives behind the same interface.
+1. **Decoupling from the storage technology.**
+   If Neo4j is replaced with another graph store or an RDF triple store
+   (RDF4J, Jena, GraphDB, …), only the adapter changes. The service, the
+   controller, the DTOs and the tests stay untouched.
 
-## c) Adapting the data structure
+2. **Type safety and refactorability.**
+   With Spring Data, the repository methods are real Java methods. Renaming a
+   field is a refactor the IDE can perform safely. With Cypher strings
+   scattered across services, the same rename is a fragile search-and-replace
+   that the compiler cannot help with.
 
-A schema change touches the wire format, the persisted graph, the ontology,
-derived/inferred data, and all clients. Concrete mitigations already in the
-code:
+3. **No SQL/Cypher injection by construction.**
+   Spring Data binds parameters; hand-written query strings invite the
+   classic injection pitfalls if anyone ever interpolates user input.
 
-| Change                    | Mitigation                                                              |
-|---------------------------|-------------------------------------------------------------------------|
-| New optional JSON field   | `@JsonIgnoreProperties(ignoreUnknown = true)` on `RecipeDTO` (tolerant reader). |
-| Renamed JSON field        | `@JsonAlias({"sequence","order","position"})` on `RecipeStepDTO.sequence`. |
-| New language for labels   | `@JsonAnySetter` / `@JsonAnyGetter` on `LabelDTO` — any ISO-639-1 code works without code changes. |
-| Breaking structural change| Explicit `version` field on the wire + `/api/v1` URL prefix → a parallel `/api/v2` controller can coexist. |
-| Old data already in the DB| Each node stores `schemaVersion`; the service can dual-read or a migration job rewrites old nodes. |
+4. **Testability.**
+   Because the service depends on the `RecipeRepository` interface, the unit
+   test (`RecipeServiceTest`) simply mocks it with Mockito. No graph database
+   is required to test business logic.
 
-Things to keep in mind beyond the code:
+5. **Localized custom queries.**
+   When a real custom Cypher query is genuinely needed, it lives in exactly
+   one place (the Spring Data repository interface) instead of being
+   duplicated as ad-hoc strings across services.
 
-- **Ontology consistency** — recipes link to ingredients, techniques, appliances. Renaming a relationship type breaks every downstream consumer (inference, search, recommendations). Schema changes are coordinated ontology changes, not just code changes.
-- **Derived/inferred data** — if an inference engine produces facts, migrating nodes is not enough; derived data has to be re-computed.
-- **Three independent version concepts** that must not be confused: the *API version* (`/api/v1`), the *payload schema version* (`version` field), and the *artifact version* (Maven coordinate).
-- **Tests as a contract** — keep regression tests for every historical wire format; a future v2 must *add* v1-compatibility tests, not replace them.
-- **Single change point** — because all DTO ↔ domain translation happens in `RecipeMapper`, the blast radius of a schema change is bounded.
-- **Communication** — breaking changes require a changelog entry, advance notice to consumers, and a deprecation window.
+6. **Schema evolution is contained.**
+   When the data model changes, the mapping/annotations and one repository
+   change; consumers of the port do not.
+
+7. **Transaction management is declarative.**
+   `@Transactional` (read-only on reads, read-write on writes) wraps the
+   whole aggregate write — recipe + steps + relationships — into one
+   atomic unit. With native queries this discipline is easy to lose.
+
+8. **Domain-driven naming.**
+   `recipeRepository.save(recipe)` reads as the business operation it is,
+   not as a graph traversal. The ontology lives in classes, the storage
+   lives behind an interface.
+
+The trade-off, honestly stated: for very complex graph traversals, hand-tuned
+Cypher can outperform a generic repository call. The right strategy is
+*encapsulation by default, raw query when measurably necessary* — and even
+then the raw query lives behind the same interface.
+
+---
+
+## c) Problems that arise when the recipe data structure changes
+
+A schema change has effects in at least five places, and each one has to be
+considered explicitly. The project demonstrates concrete mitigations for
+each.
+
+### Categories of change
+
+| Change | Impact | Mitigation already in the code |
+|---|---|---|
+| **New optional field** in the JSON | Old service rejects unknown JSON properties → 400. | `@JsonIgnoreProperties(ignoreUnknown = true)` on `RecipeDTO` (tolerant reader). |
+| **Renamed JSON field** | Existing clients send the old name and break. | `@JsonAlias({"sequence","order","position"})` on `RecipeStepDTO.sequence`. |
+| **New language for labels** | Hard-coded language fields would require a code change. | `LabelDTO` uses `@JsonAnySetter` / `@JsonAnyGetter` → any ISO-639-1 code works. |
+| **Structurally different payload** (nested objects, removed fields, breaking change) | All clients break at once. | Explicit `version` field on the wire; URL prefix `/api/v1/...` so a `/api/v2` controller can live in parallel. |
+| **Already-persisted data uses old shape** | New code reads old nodes incorrectly. | Each recipe persists `schemaVersion`; a migration job can iterate and rewrite, or the service can dual-read. |
+
+### Concrete concerns to discuss
+
+1. **Backwards compatibility of the API.** Existing clients (editorial UI,
+   ingestion pipelines, mobile apps) cannot be upgraded in lock-step with the
+   backend. We mitigate via tolerant readers, JSON aliases, the explicit
+   `version` field, and the `/api/v1` namespace.
+
+2. **Data already in the graph.** Even after the code changes, the database
+   still contains nodes written under the old schema. Options:
+   - **Dual-read**: branch in the mapper or service on `schemaVersion`.
+   - **Lazy migration**: rewrite a node the first time it is touched.
+   - **Eager migration job**: a one-shot Cypher migration with `APOC` or a
+     Spring Batch job, recorded in `RELEASING.md`.
+
+3. **Ontology consistency.** Recipes are not isolated rows — they are
+   connected to ingredients, techniques, appliances, and so on. A renamed
+   relationship type breaks every downstream consumer (inference engine,
+   recommendation service, search). Schema changes therefore need a
+   coordinated ontology change, not just a code change.
+
+4. **Inference / derived data.** If the ontology drives an inference engine,
+   migrating nodes is not enough — derived facts have to be re-computed
+   under the new schema.
+
+5. **Versioning everywhere.** Three independent version concepts must not be
+   confused:
+   - the **API version** (`/api/v1`),
+   - the **payload schema version** (`RecipeDTO.version` / `Recipe.schemaVersion`),
+   - the **artifact version** (Maven coordinate; see question d).
+
+6. **Tests as a contract.** A regression test for *each historical wire
+   format* protects against accidental breakage. The current test suite
+   covers v1; a future v2 must add v1-compatibility tests, not replace
+   them.
+
+7. **Single change point.** Because all DTO ↔ domain translation happens in
+   `RecipeMapper`, the cost of a schema change is bounded — exactly the
+   point of having that layer.
+
+8. **Communication.** Breaking API or wire-format changes require a
+   coordinated release: changelog, advance notice to consumers, deprecation
+   window, and ideally feature flags.
+
+---
 
 ## d) Publishing the Maven artifact
 
